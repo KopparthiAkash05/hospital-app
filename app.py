@@ -1,3 +1,4 @@
+
 # Add these two lines at the very top!
 import pymysql
 pymysql.install_as_MySQLdb()
@@ -31,9 +32,9 @@ load_dotenv()  # Load environment variables
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # MySQL configuration
-app.config['MYSQL_HOST'] = os.environ.get('MYSQL_HOST', 'localhost')
-app.config['MYSQL_USER'] = os.environ.get('MYSQL_USER', 'root')
-app.config['MYSQL_PASSWORD'] = os.environ.get('MYSQL_PASSWORD', '')
+app.config['MYSQL_HOST'] = os.environ.get('MYSQL_HOST', 'sql.freedb.tech')
+app.config['MYSQL_USER'] = os.environ.get('MYSQL_USER', 'u_p42gKM')
+app.config['MYSQL_PASSWORD'] = os.environ.get('MYSQL_PASSWORD', 'hw9BfmF4w29g')
 app.config['MYSQL_DB'] = os.environ.get('MYSQL_DB', 'hospital_db')
 
 mysql = MySQL(app)
