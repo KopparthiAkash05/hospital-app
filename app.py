@@ -22,12 +22,12 @@ load_dotenv()
 app = Flask(__name__)
 
 # Secret key for session management (Loaded from Render Environment Variables)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.secret_key = os.environ.get('SECRET_KEY', '202005')
 
 # MySQL configuration (Loaded from Render Environment Variables)
-app.config['MYSQL_HOST'] = os.environ.get('MYSQL_HOST', 'localhost')
-app.config['MYSQL_USER'] = os.environ.get('MYSQL_USER', 'root')
-app.config['MYSQL_PASSWORD'] = os.environ.get('MYSQL_PASSWORD', '')
+app.config['MYSQL_HOST'] = os.environ.get('MYSQL_HOST', 'sql.freedb.tech')
+app.config['MYSQL_USER'] = os.environ.get('MYSQL_USER', 'u_p42gKM')
+app.config['MYSQL_PASSWORD'] = os.environ.get('MYSQL_PASSWORD', 'hw9BfmF4w29g')
 app.config['MYSQL_DB'] = os.environ.get('MYSQL_DB', 'hospital_db')
 
 # Custom MySQL wrapper to avoid mysqlclient C-extension issues on Render
