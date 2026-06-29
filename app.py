@@ -1,14 +1,12 @@
-
-# Add these two lines at the very top!
+import os
 import pymysql
 pymysql.install_as_MySQLdb()
 
 # ========== IMPORTS ==========
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-from flask_mysqldb import MySQL
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, g
+import MySQLdb.cursors
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
-import MySQLdb.cursors
 import re
 from functools import wraps
 from flask_mail import Mail, Message
@@ -16,43 +14,66 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
 from dotenv import load_dotenv
+
+load_dotenv()
 
 # ========== FLASK APP CONFIGURATION ==========
 app = Flask(__name__)
 
-# Secret key for session management
-app.secret_key = 'your_secret_key_here_change_this_in_production'
-
-# MySQL configuration
-load_dotenv()  # Load environment variables
-
-# Use environment variables for security
+# Secret key for session management (Loaded from Render Environment Variables)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
-# MySQL configuration
-app.config['MYSQL_HOST'] = os.environ.get('MYSQL_HOST', 'sql.freedb.tech')
-app.config['MYSQL_USER'] = os.environ.get('MYSQL_USER', 'u_p42gKM')
-app.config['MYSQL_PASSWORD'] = os.environ.get('MYSQL_PASSWORD', 'hw9BfmF4w29g')
+# MySQL configuration (Loaded from Render Environment Variables)
+app.config['MYSQL_HOST'] = os.environ.get('MYSQL_HOST', 'localhost')
+app.config['MYSQL_USER'] = os.environ.get('MYSQL_USER', 'root')
+app.config['MYSQL_PASSWORD'] = os.environ.get('MYSQL_PASSWORD', '')
 app.config['MYSQL_DB'] = os.environ.get('MYSQL_DB', 'hospital_db')
+
+# Custom MySQL wrapper to avoid mysqlclient C-extension issues on Render
+class MySQL:
+    def __init__(self, app=None):
+        if app is not None:
+            self.init_app(app)
+            
+    def init_app(self, app):
+        self.app = app
+        
+    @property
+    def connection(self):
+        # Reuses the same connection for the duration of the web request
+        if 'mysql_db' not in g:
+            g.mysql_db = pymysql.connect(
+                host=self.app.config['MYSQL_HOST'],
+                user=self.app.config['MYSQL_USER'],
+                password=self.app.config['MYSQL_PASSWORD'],
+                database=self.app.config['MYSQL_DB'],
+                cursorclass=MySQLdb.cursors.DictCursor
+            )
+        return g.mysql_db
 
 mysql = MySQL(app)
 
-# Email configuration
+# Automatically close the database connection when the web request ends
+@app.teardown_appcontext
+def close_connection(exception):
+    db = g.pop('mysql_db', None)
+    if db is not None:
+        db.close()
+
+# Email configuration (Loaded from Render Environment Variables)
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = 'your_email@gmail.com'  # Change this
-app.config['MAIL_PASSWORD'] = 'your_app_password'      # Change this
-app.config['MAIL_DEFAULT_SENDER'] = 'your_email@gmail.com'  # Change this
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'your_email@gmail.com')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'your_app_password')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', 'your_email@gmail.com')
 
 mail = Mail(app)
 scheduler = BackgroundScheduler()
 scheduler.start()
 
 # ========== WEB DECORATORS ==========
-
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -90,7 +111,6 @@ def patient_required(f):
     return decorated_function
 
 # ========== API DECORATORS ==========
-
 def api_login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -124,13 +144,11 @@ def api_admin_required(f):
     return decorated_function
 
 # ========== HOME ROUTE ==========
-
 @app.route('/')
 def index():
     return render_template('index.html')
 
 # ========== AUTHENTICATION ROUTES ==========
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -291,13 +309,11 @@ def logout():
     return redirect(url_for('index'))
 
 # ========== PATIENT ROUTES ==========
-
 @app.route('/patient/dashboard')
 @patient_required
 def patient_dashboard():
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     
-    # Get upcoming appointments
     cursor.execute('''
         SELECT a.*, d.name as doctor_name, d.specialization 
         FROM Appointment a 
@@ -307,7 +323,6 @@ def patient_dashboard():
     ''', (session['id'],))
     upcoming_appointments = cursor.fetchall()
     
-    # Get appointment history
     cursor.execute('''
         SELECT a.*, d.name as doctor_name, d.specialization 
         FROM Appointment a 
@@ -335,7 +350,6 @@ def view_doctors():
     
     doctors = cursor.fetchall()
     
-    # Get unique specializations for filter
     cursor.execute('SELECT DISTINCT specialization FROM Doctor')
     specializations = [row['specialization'] for row in cursor.fetchall()]
     
@@ -347,11 +361,9 @@ def view_doctors():
 def book_appointment(doctor_id):
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     
-    # Get doctor details
     cursor.execute('SELECT * FROM Doctor WHERE doctor_id = %s', (doctor_id,))
     doctor = cursor.fetchone()
     
-    # Handle case where doctor doesn't exist
     if not doctor:
         flash('Doctor not found!', 'danger')
         cursor.close()
@@ -361,7 +373,6 @@ def book_appointment(doctor_id):
         date = request.form['date']
         time = request.form['time']
         
-        # Check if slot is already booked
         cursor.execute('''
             SELECT * FROM Appointment 
             WHERE doctor_id = %s AND date = %s AND time = %s 
@@ -372,8 +383,8 @@ def book_appointment(doctor_id):
         
         if existing:
             flash('This time slot is already booked! Please choose another.', 'warning')
-            cursor.close()  # FIXED: Close cursor before redirecting
-            return redirect(url_for('book_appointment', doctor_id=doctor_id))  # FIXED: Redirect back
+            cursor.close()
+            return redirect(url_for('book_appointment', doctor_id=doctor_id))
         else:
             cursor.execute(
                 'INSERT INTO Appointment (patient_id, doctor_id, date, time, status) VALUES (%s, %s, %s, %s, %s)',
@@ -385,10 +396,7 @@ def book_appointment(doctor_id):
             return redirect(url_for('patient_dashboard'))
     
     cursor.close()
-    
-    # Pass today's date to the template
     today = datetime.now().strftime('%Y-%m-%d')
-    
     return render_template('patient/book_appointment.html', doctor=doctor, today=today)
 
 @app.route('/patient/book_appointment', methods=['GET', 'POST'])
@@ -401,7 +409,6 @@ def patient_book_appointment_page():
         date = request.form['date']
         time = request.form['time']
         
-        # Check if slot is already booked
         cursor.execute('''
             SELECT * FROM Appointment 
             WHERE doctor_id = %s AND date = %s AND time = %s 
@@ -412,8 +419,8 @@ def patient_book_appointment_page():
         
         if existing:
             flash('This time slot is already booked! Please choose another.', 'warning')
-            cursor.close()  # FIXED: Close cursor before redirecting
-            return redirect(url_for('patient_book_appointment_page'))  # FIXED: Redirect back
+            cursor.close()
+            return redirect(url_for('patient_book_appointment_page'))
         else:
             cursor.execute(
                 'INSERT INTO Appointment (patient_id, doctor_id, date, time, status) VALUES (%s, %s, %s, %s, %s)',
@@ -424,14 +431,11 @@ def patient_book_appointment_page():
             flash('Appointment booked successfully! Waiting for doctor approval.', 'success')
             return redirect(url_for('patient_dashboard'))
     
-    # GET request - show doctors list
     cursor.execute('SELECT * FROM Doctor')
     doctors = cursor.fetchall()
     cursor.close()
     
-    # Pass today's date to template
     today = datetime.now().strftime('%Y-%m-%d')
-    
     return render_template('patient/book_appointment_page.html', doctors=doctors, today=today)
 
 @app.route('/patient/cancel/<int:appointment_id>')
@@ -448,13 +452,11 @@ def cancel_appointment(appointment_id):
     return redirect(url_for('patient_dashboard'))
 
 # ========== DOCTOR ROUTES ==========
-
 @app.route('/doctor/dashboard')
 @doctor_required
 def doctor_dashboard():
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     
-    # Get today's appointments
     today = datetime.now().date()
     cursor.execute('''
         SELECT a.*, p.name as patient_name, p.email as patient_email, p.phone as patient_phone
@@ -465,7 +467,6 @@ def doctor_dashboard():
     ''', (session['id'], today))
     today_appointments = cursor.fetchall()
     
-    # Get pending appointments
     cursor.execute('''
         SELECT a.*, p.name as patient_name, p.email as patient_email, a.date, a.time
         FROM Appointment a 
@@ -546,13 +547,11 @@ def manage_schedule():
     return render_template('doctor/schedule.html', doctor=doctor)
 
 # ========== ADMIN ROUTES ==========
-
 @app.route('/admin/dashboard')
 @admin_required
 def admin_dashboard():
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     
-    # Get statistics
     cursor.execute('SELECT COUNT(*) as total FROM Patient')
     total_patients = cursor.fetchone()['total']
     
@@ -600,7 +599,6 @@ def admin_patients():
 def admin_reports():
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     
-    # Get all appointments with details
     cursor.execute('''
         SELECT a.*, p.name as patient_name, d.name as doctor_name 
         FROM Appointment a 
@@ -614,7 +612,6 @@ def admin_reports():
     return render_template('admin/reports.html', appointments=appointments)
 
 # ========== SYMPTOM CHECKER ==========
-
 SYMPTOM_DEPARTMENT_MAP = {
     'fever': ['General Medicine', 'Infectious Disease'],
     'cough': ['General Medicine', 'Pulmonology'],
@@ -645,7 +642,6 @@ SYMPTOM_DEPARTMENT_MAP = {
 }
 
 def suggest_department(symptoms):
-    """Suggest department based on symptoms"""
     symptoms_lower = symptoms.lower()
     department_scores = {}
     
@@ -675,47 +671,55 @@ def symptom_checker():
                          symptoms=symptoms)
 
 # ========== EMAIL REMINDER SYSTEM ==========
-
 def send_appointment_reminder():
     """Send email reminders for appointments scheduled tomorrow"""
-    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    # Create a direct connection because this runs in a background thread (outside Flask request context)
+    conn = pymysql.connect(
+        host=app.config['MYSQL_HOST'],
+        user=app.config['MYSQL_USER'],
+        password=app.config['MYSQL_PASSWORD'],
+        database=app.config['MYSQL_DB'],
+        cursorclass=MySQLdb.cursors.DictCursor
+    )
+    cursor = conn.cursor()
     
     tomorrow = (datetime.now() + timedelta(days=1)).date()
     
-    cursor.execute('''
-        SELECT a.*, p.name as patient_name, p.email as patient_email,
-               d.name as doctor_name, d.email as doctor_email
-        FROM Appointment a
-        JOIN Patient p ON a.patient_id = p.patient_id
-        JOIN Doctor d ON a.doctor_id = d.doctor_id
-        WHERE a.date = %s AND a.status = 'Approved'
-    ''', (tomorrow,))
-    
-    appointments = cursor.fetchall()
-    
-    for appointment in appointments:
-        send_email_reminder(
-            to_email=appointment['patient_email'],
-            patient_name=appointment['patient_name'],
-            doctor_name=appointment['doctor_name'],
-            appointment_date=appointment['date'],
-            appointment_time=appointment['time'],
-            recipient_type='patient'
-        )
+    try:
+        cursor.execute('''
+            SELECT a.*, p.name as patient_name, p.email as patient_email,
+                   d.name as doctor_name, d.email as doctor_email
+            FROM Appointment a
+            JOIN Patient p ON a.patient_id = p.patient_id
+            JOIN Doctor d ON a.doctor_id = d.doctor_id
+            WHERE a.date = %s AND a.status = 'Approved'
+        ''', (tomorrow,))
         
-        send_email_reminder(
-            to_email=appointment['doctor_email'],
-            patient_name=appointment['patient_name'],
-            doctor_name=appointment['doctor_name'],
-            appointment_date=appointment['date'],
-            appointment_time=appointment['time'],
-            recipient_type='doctor'
-        )
-    
-    cursor.close()
+        appointments = cursor.fetchall()
+        
+        for appointment in appointments:
+            send_email_reminder(
+                to_email=appointment['patient_email'],
+                patient_name=appointment['patient_name'],
+                doctor_name=appointment['doctor_name'],
+                appointment_date=appointment['date'],
+                appointment_time=appointment['time'],
+                recipient_type='patient'
+            )
+            
+            send_email_reminder(
+                to_email=appointment['doctor_email'],
+                patient_name=appointment['patient_name'],
+                doctor_name=appointment['doctor_name'],
+                appointment_date=appointment['date'],
+                appointment_time=appointment['time'],
+                recipient_type='doctor'
+            )
+    finally:
+        cursor.close()
+        conn.close()
 
 def send_email_reminder(to_email, patient_name, doctor_name, appointment_date, appointment_time, recipient_type='patient'):
-    """Send email reminder using smtplib"""
     try:
         if recipient_type == 'patient':
             subject = f"Appointment Reminder - Dr. {doctor_name} - Tomorrow at {appointment_time}"
@@ -723,12 +727,9 @@ def send_email_reminder(to_email, patient_name, doctor_name, appointment_date, a
             Dear {patient_name},
             
             This is a reminder about your upcoming appointment:
-            
             Doctor: Dr. {doctor_name}
             Date: {appointment_date}
             Time: {appointment_time}
-            
-            Please arrive 15 minutes before your scheduled time.
             
             Best regards,
             Smart Hospital Team
@@ -739,7 +740,6 @@ def send_email_reminder(to_email, patient_name, doctor_name, appointment_date, a
             Dear Dr. {doctor_name},
             
             You have an appointment scheduled for tomorrow:
-            
             Patient: {patient_name}
             Date: {appointment_date}
             Time: {appointment_time}
@@ -760,12 +760,9 @@ def send_email_reminder(to_email, patient_name, doctor_name, appointment_date, a
         server.send_message(msg)
         server.quit()
         
-        print(f"Reminder sent to {to_email}")
-        
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
 
-# Schedule the reminder to run daily at 9 AM
 scheduler.add_job(
     func=send_appointment_reminder,
     trigger="cron",
@@ -773,14 +770,11 @@ scheduler.add_job(
     minute=0
 )
 
-# ========== REST APIs ==========
-
-# Patient APIs
+# ========== REST APIs (All unchanged) ==========
 @app.route('/api/patient/register', methods=['POST'])
 def api_register():
     try:
         data = request.get_json()
-        
         name = data.get('name', '').strip()
         email = data.get('email', '').strip()
         password = data.get('password', '')
@@ -790,7 +784,6 @@ def api_register():
         
         if not all([name, email, password, phone, age, gender]):
             return jsonify({'success': False, 'message': 'All fields are required'}), 400
-        
         if not re.match(r'[^@]+@[^@]+\.[^@]+', email):
             return jsonify({'success': False, 'message': 'Invalid email address'}), 400
         
@@ -810,12 +803,7 @@ def api_register():
         mysql.connection.commit()
         cursor.close()
         
-        return jsonify({
-            'success': True,
-            'message': 'Registration successful',
-            'patient': {'name': name, 'email': email}
-        }), 201
-        
+        return jsonify({'success': True, 'message': 'Registration successful', 'patient': {'name': name, 'email': email}}), 201
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -839,21 +827,11 @@ def api_patient_login():
             session['email'] = account['email']
             session['name'] = account['name']
             session['user_type'] = 'patient'
-            
             cursor.close()
-            return jsonify({
-                'success': True,
-                'message': 'Login successful',
-                'patient': {
-                    'id': account['patient_id'],
-                    'name': account['name'],
-                    'email': account['email']
-                }
-            }), 200
+            return jsonify({'success': True, 'message': 'Login successful', 'patient': {'id': account['patient_id'], 'name': account['name'], 'email': account['email']}}), 200
         else:
             cursor.close()
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-            
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -861,7 +839,6 @@ def api_patient_login():
 def api_get_doctors():
     try:
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        
         specialization = request.args.get('specialization')
         
         if specialization:
@@ -870,19 +847,11 @@ def api_get_doctors():
             cursor.execute('SELECT * FROM Doctor')
         
         doctors = cursor.fetchall()
-        
         cursor.execute('SELECT DISTINCT specialization FROM Doctor')
         specializations = [row['specialization'] for row in cursor.fetchall()]
-        
         cursor.close()
         
-        return jsonify({
-            'success': True,
-            'doctors': doctors,
-            'specializations': specializations,
-            'count': len(doctors)
-        }), 200
-        
+        return jsonify({'success': True, 'doctors': doctors, 'specializations': specializations, 'count': len(doctors)}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -899,7 +868,6 @@ def api_book_appointment():
             return jsonify({'success': False, 'message': 'Doctor ID, date, and time are required'}), 400
         
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        
         cursor.execute('SELECT * FROM Doctor WHERE doctor_id = %s', (doctor_id,))
         doctor = cursor.fetchone()
         
@@ -908,11 +876,8 @@ def api_book_appointment():
             return jsonify({'success': False, 'message': 'Doctor not found'}), 404
         
         cursor.execute('''
-            SELECT * FROM Appointment 
-            WHERE doctor_id = %s AND date = %s AND time = %s 
-            AND status IN ('Pending', 'Approved')
+            SELECT * FROM Appointment WHERE doctor_id = %s AND date = %s AND time = %s AND status IN ('Pending', 'Approved')
         ''', (doctor_id, date, time))
-        
         existing = cursor.fetchone()
         
         if existing:
@@ -924,22 +889,10 @@ def api_book_appointment():
             (session['id'], doctor_id, date, time, 'Pending')
         )
         mysql.connection.commit()
-        
         appointment_id = cursor.lastrowid
         cursor.close()
         
-        return jsonify({
-            'success': True,
-            'message': 'Appointment booked successfully',
-            'appointment': {
-                'appointment_id': appointment_id,
-                'doctor_id': doctor_id,
-                'date': date,
-                'time': time,
-                'status': 'Pending'
-            }
-        }), 201
-        
+        return jsonify({'success': True, 'message': 'Appointment booked successfully', 'appointment': {'appointment_id': appointment_id, 'doctor_id': doctor_id, 'date': date, 'time': time, 'status': 'Pending'}}), 201
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -948,28 +901,15 @@ def api_book_appointment():
 def api_get_patient_appointments():
     try:
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        
         cursor.execute('''
-            SELECT a.*, d.name as doctor_name, d.specialization 
-            FROM Appointment a 
-            JOIN Doctor d ON a.doctor_id = d.doctor_id 
-            WHERE a.patient_id = %s
-            ORDER BY a.date DESC, a.time DESC
+            SELECT a.*, d.name as doctor_name, d.specialization FROM Appointment a JOIN Doctor d ON a.doctor_id = d.doctor_id WHERE a.patient_id = %s ORDER BY a.date DESC, a.time DESC
         ''', (session['id'],))
-        
         appointments = cursor.fetchall()
         cursor.close()
-        
-        return jsonify({
-            'success': True,
-            'appointments': appointments,
-            'count': len(appointments)
-        }), 200
-        
+        return jsonify({'success': True, 'appointments': appointments, 'count': len(appointments)}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
-# Doctor APIs
 @app.route('/api/doctor/login', methods=['POST'])
 def api_doctor_login():
     try:
@@ -990,22 +930,11 @@ def api_doctor_login():
             session['email'] = account['email']
             session['name'] = account['name']
             session['user_type'] = 'doctor'
-            
             cursor.close()
-            return jsonify({
-                'success': True,
-                'message': 'Login successful',
-                'doctor': {
-                    'id': account['doctor_id'],
-                    'name': account['name'],
-                    'email': account['email'],
-                    'specialization': account['specialization']
-                }
-            }), 200
+            return jsonify({'success': True, 'message': 'Login successful', 'doctor': {'id': account['doctor_id'], 'name': account['name'], 'email': account['email'], 'specialization': account['specialization']}}), 200
         else:
             cursor.close()
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-            
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -1014,35 +943,20 @@ def api_doctor_login():
 def api_get_doctor_appointments():
     try:
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        
         status_filter = request.args.get('status')
         
         if status_filter:
             cursor.execute('''
-                SELECT a.*, p.name as patient_name, p.email as patient_email, p.phone as patient_phone
-                FROM Appointment a 
-                JOIN Patient p ON a.patient_id = p.patient_id 
-                WHERE a.doctor_id = %s AND a.status = %s
-                ORDER BY a.date, a.time
+                SELECT a.*, p.name as patient_name, p.email as patient_email, p.phone as patient_phone FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = %s AND a.status = %s ORDER BY a.date, a.time
             ''', (session['id'], status_filter))
         else:
             cursor.execute('''
-                SELECT a.*, p.name as patient_name, p.email as patient_email, p.phone as patient_phone
-                FROM Appointment a 
-                JOIN Patient p ON a.patient_id = p.patient_id 
-                WHERE a.doctor_id = %s
-                ORDER BY a.date DESC, a.time DESC
+                SELECT a.*, p.name as patient_name, p.email as patient_email, p.phone as patient_phone FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = %s ORDER BY a.date DESC, a.time DESC
             ''', (session['id'],))
         
         appointments = cursor.fetchall()
         cursor.close()
-        
-        return jsonify({
-            'success': True,
-            'appointments': appointments,
-            'count': len(appointments)
-        }), 200
-        
+        return jsonify({'success': True, 'appointments': appointments, 'count': len(appointments)}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -1056,17 +970,11 @@ def api_approve_appointment():
         
         if not appointment_id or not action:
             return jsonify({'success': False, 'message': 'Appointment ID and action required'}), 400
-        
         if action not in ['approve', 'reject']:
             return jsonify({'success': False, 'message': 'Action must be "approve" or "reject"'}), 400
         
         cursor = mysql.connection.cursor()
-        
-        cursor.execute('''
-            SELECT * FROM Appointment 
-            WHERE appointment_id = %s AND doctor_id = %s
-        ''', (appointment_id, session['id']))
-        
+        cursor.execute('SELECT * FROM Appointment WHERE appointment_id = %s AND doctor_id = %s', (appointment_id, session['id']))
         appointment = cursor.fetchone()
         
         if not appointment:
@@ -1074,57 +982,31 @@ def api_approve_appointment():
             return jsonify({'success': False, 'message': 'Appointment not found'}), 404
         
         new_status = 'Approved' if action == 'approve' else 'Rejected'
-        
-        cursor.execute('''
-            UPDATE Appointment 
-            SET status = %s 
-            WHERE appointment_id = %s AND doctor_id = %s
-        ''', (new_status, appointment_id, session['id']))
-        
+        cursor.execute('UPDATE Appointment SET status = %s WHERE appointment_id = %s AND doctor_id = %s', (new_status, appointment_id, session['id']))
         mysql.connection.commit()
         cursor.close()
         
-        return jsonify({
-            'success': True,
-            'message': f'Appointment {action}d successfully',
-            'new_status': new_status
-        }), 200
-        
+        return jsonify({'success': True, 'message': f'Appointment {action}d successfully', 'new_status': new_status}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
-# Admin APIs
 @app.route('/api/admin/dashboard', methods=['GET'])
 @api_admin_required
 def api_admin_dashboard():
     try:
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        
         cursor.execute('SELECT COUNT(*) as total FROM Patient')
         total_patients = cursor.fetchone()['total']
-        
         cursor.execute('SELECT COUNT(*) as total FROM Doctor')
         total_doctors = cursor.fetchone()['total']
-        
         today = datetime.now().date()
         cursor.execute('SELECT COUNT(*) as total FROM Appointment WHERE date = %s', (today,))
         today_appointments = cursor.fetchone()['total']
-        
         cursor.execute('SELECT COUNT(*) as total FROM Appointment WHERE status = "Pending"')
         pending_requests = cursor.fetchone()['total']
-        
         cursor.close()
         
-        return jsonify({
-            'success': True,
-            'dashboard': {
-                'total_patients': total_patients,
-                'total_doctors': total_doctors,
-                'today_appointments': today_appointments,
-                'pending_requests': pending_requests
-            }
-        }), 200
-        
+        return jsonify({'success': True, 'dashboard': {'total_patients': total_patients, 'total_doctors': total_doctors, 'today_appointments': today_appointments, 'pending_requests': pending_requests}}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -1133,7 +1015,6 @@ def api_admin_dashboard():
 def api_add_doctor():
     try:
         data = request.get_json()
-        
         name = data.get('name', '').strip()
         specialization = data.get('specialization', '').strip()
         experience = data.get('experience')
@@ -1159,21 +1040,10 @@ def api_add_doctor():
             (name, specialization, experience, email, hashed_password, phone, available_slots)
         )
         mysql.connection.commit()
-        
         doctor_id = cursor.lastrowid
         cursor.close()
         
-        return jsonify({
-            'success': True,
-            'message': 'Doctor added successfully',
-            'doctor': {
-                'id': doctor_id,
-                'name': name,
-                'email': email,
-                'specialization': specialization
-            }
-        }), 201
-        
+        return jsonify({'success': True, 'message': 'Doctor added successfully', 'doctor': {'id': doctor_id, 'name': name, 'email': email, 'specialization': specialization}}), 201
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
@@ -1188,7 +1058,6 @@ def api_remove_doctor():
             return jsonify({'success': False, 'message': 'Doctor ID required'}), 400
         
         cursor = mysql.connection.cursor()
-        
         cursor.execute('SELECT * FROM Doctor WHERE doctor_id = %s', (doctor_id,))
         doctor = cursor.fetchone()
         
@@ -1201,11 +1070,9 @@ def api_remove_doctor():
         cursor.close()
         
         return jsonify({'success': True, 'message': 'Doctor removed successfully'}), 200
-        
     except Exception as e:
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
-# Utility APIs
 @app.route('/api/logout', methods=['POST'])
 def api_logout():
     session.clear()
@@ -1213,16 +1080,9 @@ def api_logout():
 
 @app.route('/api/health', methods=['GET'])
 def api_health_check():
-    return jsonify({
-        'status': 'OK',
-        'message': 'Hospital API is running',
-        'timestamp': datetime.now().isoformat()
-    }), 200
+    return jsonify({'status': 'OK', 'message': 'Hospital API is running', 'timestamp': datetime.now().isoformat()}), 200
 
 # ========== MAIN EXECUTION ==========
-
-if __name__ == '__main__':
-    app.run(debug=True)
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
