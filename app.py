@@ -614,6 +614,29 @@ def cancel_appointment(appointment_id):
     flash('Appointment cancelled successfully!', 'info')
     return redirect(url_for('patient_dashboard'))
 
+@app.route('/patient/cancel/<int:appointment_id>')
+@patient_required
+def cancel_appointment(appointment_id):
+    cursor = mysql.connection.cursor()
+    
+    # Only allow cancellation if the appointment belongs to this patient
+    # and is currently Pending or Approved
+    cursor.execute('''
+        UPDATE Appointment 
+        SET status = 'Cancelled' 
+        WHERE appointment_id = %s AND patient_id = %s AND status IN ('Pending', 'Approved')
+    ''', (appointment_id, session['id']))
+    
+    mysql.connection.commit()
+    
+    if cursor.rowcount > 0:
+        flash('Appointment cancelled successfully!', 'success')
+    else:
+        flash('Could not cancel appointment. It may have already been completed or cancelled.', 'warning')
+    
+    cursor.close()
+    return redirect(url_for('patient_dashboard'))
+
 # ========== DOCTOR ROUTES ==========
 @app.route('/doctor/dashboard')
 @doctor_required
