@@ -36,7 +36,11 @@
                             <h3>Dr. {{ appointment.doctor_name }}</h3>
                             <p><i class="fas fa-stethoscope"></i> {{ appointment.specialization }}</p>
                             <p><i class="fas fa-calendar"></i> {{ appointment.date }}</p>
-                            <p><i class="fas fa-clock"></i> {{ appointment.time }}</p>
+                            <!-- For upcoming appointments -->
+<p><i class="fas fa-clock"></i> {{ appointment.time_formatted }}</p>
+
+<!-- For appointment history -->
+<p><i class="fas fa-clock"></i> {{ appointment.time_formatted }}</p>
                             <span class="badge badge-{{ appointment.status.lower() }}">{{ appointment.status }}</span>
                         </div>
                         {% if appointment.status == 'Pending' %}
@@ -71,7 +75,11 @@
                             <h3>Dr. {{ appointment.doctor_name }}</h3>
                             <p><i class="fas fa-stethoscope"></i> {{ appointment.specialization }}</p>
                             <p><i class="fas fa-calendar"></i> {{ appointment.date }}</p>
-                            <p><i class="fas fa-clock"></i> {{ appointment.time }}</p>
+                          <!-- For upcoming appointments -->
+<p><i class="fas fa-clock"></i> {{ appointment.time_formatted }}</p>
+
+<!-- For appointment history -->
+<p><i class="fas fa-clock"></i> {{ appointment.time_formatted }}</p>
                             <span class="badge badge-{{ appointment.status.lower() }}">{{ appointment.status }}</span>
                         </div>
                     </div>

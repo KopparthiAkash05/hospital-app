@@ -1,5 +1,6 @@
 import os
 import pymysql
+from markupsafe import Markup
 pymysql.install_as_MySQLdb()
 
 # ========== IMPORTS ==========
@@ -8,6 +9,9 @@ import MySQLdb.cursors
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 import re
+import secrets
+from datetime import datetime, timedelta
+from flask_mail import Message # Make sure this is imported
 from functools import wraps
 from flask_mail import Mail, Message
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -154,59 +158,56 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
-        user_type = request.form['user_type']
         
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
         
-        if user_type == 'patient':
-            cursor.execute('SELECT * FROM Patient WHERE email = %s', (email,))
-            account = cursor.fetchone()
-            if account and check_password_hash(account['password'], password):
-                session['loggedin'] = True
-                session['id'] = account['patient_id']
-                session['email'] = account['email']
-                session['name'] = account['name']
-                session['user_type'] = 'patient'
-                flash('Login successful!', 'success')
-                cursor.close()
-                return redirect(url_for('patient_dashboard'))
-            else:
-                flash('Invalid email or password!', 'danger')
-                
-        elif user_type == 'doctor':
-            cursor.execute('SELECT * FROM Doctor WHERE email = %s', (email,))
-            account = cursor.fetchone()
-            if account and check_password_hash(account['password'], password):
-                session['loggedin'] = True
-                session['id'] = account['doctor_id']
-                session['email'] = account['email']
-                session['name'] = account['name']
-                session['user_type'] = 'doctor'
-                flash('Login successful!', 'success')
-                cursor.close()
-                return redirect(url_for('doctor_dashboard'))
-            else:
-                flash('Invalid email or password!', 'danger')
-                
-        elif user_type == 'admin':
-            cursor.execute('SELECT * FROM Admin WHERE email = %s', (email,))
-            account = cursor.fetchone()
-            if account and check_password_hash(account['password'], password):
-                session['loggedin'] = True
-                session['id'] = account['admin_id']
-                session['email'] = account['email']
-                session['name'] = account['name']
-                session['user_type'] = 'admin'
-                flash('Login successful!', 'success')
-                cursor.close()
-                return redirect(url_for('admin_dashboard'))
-            else:
-                flash('Invalid email or password!', 'danger')
+        # Try to find user in Patient table first
+        cursor.execute('SELECT * FROM Patient WHERE email = %s', (email,))
+        account = cursor.fetchone()
         
+        if account and check_password_hash(account['password'], password):
+            session['loggedin'] = True
+            session['id'] = account['patient_id']
+            session['email'] = account['email']
+            session['name'] = account['name']
+            session['user_type'] = 'patient'
+            flash('Login successful!', 'success')
+            cursor.close()
+            return redirect(url_for('patient_dashboard'))
+        
+        # Try Doctor table
+        cursor.execute('SELECT * FROM Doctor WHERE email = %s', (email,))
+        account = cursor.fetchone()
+        
+        if account and check_password_hash(account['password'], password):
+            session['loggedin'] = True
+            session['id'] = account['doctor_id']
+            session['email'] = account['email']
+            session['name'] = account['name']
+            session['user_type'] = 'doctor'
+            flash('Login successful!', 'success')
+            cursor.close()
+            return redirect(url_for('doctor_dashboard'))
+        
+        # Try Admin table
+        cursor.execute('SELECT * FROM Admin WHERE email = %s', (email,))
+        account = cursor.fetchone()
+        
+        if account and check_password_hash(account['password'], password):
+            session['loggedin'] = True
+            session['id'] = account['admin_id']
+            session['email'] = account['email']
+            session['name'] = account['name']
+            session['user_type'] = 'admin'
+            flash('Login successful!', 'success')
+            cursor.close()
+            return redirect(url_for('admin_dashboard'))
+        
+        # If no match found
+        flash('Invalid email or password!', 'danger')
         cursor.close()
     
     return render_template('login.html')
-
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -216,6 +217,7 @@ def register():
         phone = request.form['phone']
         age = request.form['age']
         gender = request.form['gender']
+        address = request.form.get('address', '')  # Add this
         
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
         cursor.execute('SELECT * FROM Patient WHERE email = %s', (email,))
@@ -230,8 +232,8 @@ def register():
         else:
             hashed_password = generate_password_hash(password)
             cursor.execute(
-                'INSERT INTO Patient (name, email, password, phone, age, gender) VALUES (%s, %s, %s, %s, %s, %s)',
-                (name, email, hashed_password, phone, age, gender)
+                'INSERT INTO Patient (name, email, password, phone, age, gender, address) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                (name, email, hashed_password, phone, age, gender, address)
             )
             mysql.connection.commit()
             cursor.close()
@@ -241,7 +243,6 @@ def register():
         cursor.close()
     
     return render_template('register.html')
-
 @app.route('/doctor/register', methods=['GET', 'POST'])
 def doctor_register():
     if request.method == 'POST':
@@ -307,6 +308,123 @@ def logout():
     session.clear()
     flash('You have been logged out!', 'info')
     return redirect(url_for('index'))
+# ========== FORGOT PASSWORD ROUTES ==========
+
+@app.route('/forgot_password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form['email'].strip()
+        
+        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+        user_found = False
+        user_type = ''
+        user_id_col = ''
+        table_name = ''
+
+        # Check Patient
+        cursor.execute('SELECT * FROM Patient WHERE email = %s', (email,))
+        user = cursor.fetchone()
+        if user:
+            user_found = True
+            user_type = 'patient'
+            user_id_col = 'patient_id'
+            table_name = 'Patient'
+        else:
+            # Check Doctor
+            cursor.execute('SELECT * FROM Doctor WHERE email = %s', (email,))
+            user = cursor.fetchone()
+            if user:
+                user_found = True
+                user_type = 'doctor'
+                user_id_col = 'doctor_id'
+                table_name = 'Doctor'
+
+        if user_found:
+            # Generate secure token and expiry (1 hour)
+            token = secrets.token_urlsafe(32)
+            expiry = datetime.utcnow() + timedelta(hours=1)
+            
+            # Save to database
+            cursor.execute(
+                f'UPDATE {table_name} SET reset_token = %s, reset_token_expiry = %s WHERE {user_id_col} = %s',
+                (token, expiry, user[user_id_col])
+            )
+            mysql.connection.commit()
+
+            # Generate reset link
+            reset_url = url_for('reset_password', token=token, _external=True)
+
+            # Send Email
+            try:
+                msg = Message('Password Reset Request', 
+                              sender=app.config['MAIL_DEFAULT_SENDER'], 
+                              recipients=[email])
+                msg.body = f'''Hello {user['name']},
+
+You have requested to reset your password. Click the link below to set a new password:
+
+{reset_url}
+
+This link will expire in 1 hour. If you did not make this request, please ignore this email.
+
+Best regards,
+Smart Hospital Team'''
+                mail.send(msg)
+                flash('A password reset link has been sent to your email.', 'success')
+            except Exception as e:
+                flash(f'Error sending email: {str(e)}', 'danger')
+        else:
+            # Don't reveal if email exists or not for security, but show generic message
+            flash('If an account with that email exists, a reset link has been sent.', 'info')
+
+        cursor.close()
+        return redirect(url_for('forgot_password'))
+
+    return render_template('forgot_password.html')
+
+@app.route('/reset_password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    
+    # Check token in Patient table
+    cursor.execute('SELECT * FROM Patient WHERE reset_token = %s AND reset_token_expiry > %s', (token, datetime.utcnow()))
+    user = cursor.fetchone()
+    user_type = 'patient'
+    id_col = 'patient_id'
+    table = 'Patient'
+
+    # If not found in Patient, check Doctor
+    if not user:
+        cursor.execute('SELECT * FROM Doctor WHERE reset_token = %s AND reset_token_expiry > %s', (token, datetime.utcnow()))
+        user = cursor.fetchone()
+        user_type = 'doctor'
+        id_col = 'doctor_id'
+        table = 'Doctor'
+
+    if not user:
+        flash('Invalid or expired reset link.', 'danger')
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        password = request.form['password']
+        confirm_password = request.form['confirm_password']
+
+        if password != confirm_password:
+            flash('Passwords do not match!', 'danger')
+        elif len(password) < 6:
+            flash('Password must be at least 6 characters.', 'danger')
+        else:
+            hashed_password = generate_password_hash(password)
+            cursor.execute(
+                f'UPDATE {table} SET password = %s, reset_token = NULL, reset_token_expiry = NULL WHERE {id_col} = %s',
+                (hashed_password, user[id_col])
+            )
+            mysql.connection.commit()
+            flash('Password updated successfully! Please login.', 'success')
+            return redirect(url_for('login'))
+
+    cursor.close()
+    return render_template('reset_password.html', token=token)
 
 # ========== PATIENT ROUTES ==========
 @app.route('/patient/dashboard')
@@ -333,6 +451,21 @@ def patient_dashboard():
     appointment_history = cursor.fetchall()
     
     cursor.close()
+    
+    # Convert times to 12-hour AM/PM format
+    def format_time_12hr(time_obj):
+        if time_obj is None:
+            return ''
+        if isinstance(time_obj, str):
+            time_obj = datetime.strptime(time_obj, '%H:%M:%S').time()
+        return time_obj.strftime('%I:%M %p')
+    
+    for appt in upcoming_appointments:
+        appt['time_formatted'] = format_time_12hr(appt['time'])
+    
+    for appt in appointment_history:
+        appt['time_formatted'] = format_time_12hr(appt['time'])
+    
     return render_template('patient/dashboard.html', 
                          upcoming_appointments=upcoming_appointments,
                          appointment_history=appointment_history)
@@ -382,7 +515,13 @@ def book_appointment(doctor_id):
         existing = cursor.fetchone()
         
         if existing:
-            flash('This time slot is already booked! Please choose another.', 'warning')
+            # Create a helpful message with a link to find other doctors
+            message = Markup(
+                f'<strong>Dr. {doctor["name"]} is busy at this time.</strong> '
+                f'Please choose another time slot or '
+                f'<a href="{url_for("view_doctors", specialization=doctor["specialization"])}">find another {doctor["specialization"]} doctor</a>.'
+            )
+            flash(message, 'warning')
             cursor.close()
             return redirect(url_for('book_appointment', doctor_id=doctor_id))
         else:
@@ -418,7 +557,16 @@ def patient_book_appointment_page():
         existing = cursor.fetchone()
         
         if existing:
-            flash('This time slot is already booked! Please choose another.', 'warning')
+            # Get the doctor's name and specialization for the message
+            cursor.execute('SELECT name, specialization FROM Doctor WHERE doctor_id = %s', (doctor_id,))
+            busy_doc = cursor.fetchone()
+            
+            message = Markup(
+                f'<strong>Dr. {busy_doc["name"]} is not available at this time.</strong> '
+                f'Please choose another slot or '
+                f'<a href="{url_for("view_doctors", specialization=busy_doc["specialization"])}">find another {busy_doc["specialization"]} doctor</a>.'
+            )
+            flash(message, 'warning')
             cursor.close()
             return redirect(url_for('patient_book_appointment_page'))
         else:
@@ -458,28 +606,94 @@ def doctor_dashboard():
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     
     today = datetime.now().date()
+    
+    # Get today's appointments with FULL patient details
     cursor.execute('''
-        SELECT a.*, p.name as patient_name, p.email as patient_email, p.phone as patient_phone
+        SELECT a.*, 
+               p.name as patient_name, 
+               p.email as patient_email, 
+               p.phone as patient_phone,
+               p.age as patient_age,
+               p.gender as patient_gender,
+               p.address as patient_address,
+               d.specialization
         FROM Appointment a 
-        JOIN Patient p ON a.patient_id = p.patient_id 
-        WHERE a.doctor_id = %s AND a.date = %s
+        JOIN Patient p ON a.patient_id = p.patient_id
+        JOIN Doctor d ON a.doctor_id = d.doctor_id
+        WHERE a.doctor_id = %s AND a.date = %s AND a.status = 'Approved'
         ORDER BY a.time
     ''', (session['id'], today))
     today_appointments = cursor.fetchall()
     
+    # Get pending appointments
     cursor.execute('''
-        SELECT a.*, p.name as patient_name, p.email as patient_email, a.date, a.time
+        SELECT a.*, 
+               p.name as patient_name, 
+               p.email as patient_email, 
+               p.phone as patient_phone,
+               d.specialization
         FROM Appointment a 
-        JOIN Patient p ON a.patient_id = p.patient_id 
+        JOIN Patient p ON a.patient_id = p.patient_id
+        JOIN Doctor d ON a.doctor_id = d.doctor_id
         WHERE a.doctor_id = %s AND a.status = 'Pending'
         ORDER BY a.date, a.time
     ''', (session['id'],))
     pending_appointments = cursor.fetchall()
     
+    # Get completed appointments
+    cursor.execute('''
+        SELECT a.*, 
+               p.name as patient_name, 
+               p.email as patient_email, 
+               p.phone as patient_phone,
+               p.age as patient_age,
+               p.gender as patient_gender,
+               p.address as patient_address,
+               d.specialization
+        FROM Appointment a 
+        JOIN Patient p ON a.patient_id = p.patient_id
+        JOIN Doctor d ON a.doctor_id = d.doctor_id
+        WHERE a.doctor_id = %s AND a.status = 'Completed'
+        ORDER BY a.date DESC, a.time DESC
+    ''', (session['id'],))
+    completed_appointments = cursor.fetchall()
+    
     cursor.close()
+    
+    # Convert times to 12-hour AM/PM format
+    def format_time_12hr(time_obj):
+        if time_obj is None:
+            return ''
+        if isinstance(time_obj, str):
+            time_obj = datetime.strptime(time_obj, '%H:%M:%S').time()
+        return time_obj.strftime('%I:%M %p')  # e.g., "09:30 AM" or "02:00 PM"
+    
+    for appt in today_appointments:
+        appt['time_formatted'] = format_time_12hr(appt['time'])
+    
+    for appt in pending_appointments:
+        appt['time_formatted'] = format_time_12hr(appt['time'])
+    
+    for appt in completed_appointments:
+        appt['time_formatted'] = format_time_12hr(appt['time'])
+    
     return render_template('doctor/dashboard.html', 
                          today_appointments=today_appointments,
-                         pending_appointments=pending_appointments)
+                         pending_appointments=pending_appointments,
+                         completed_appointments=completed_appointments)
+
+@app.route('/doctor/complete/<int:appointment_id>')
+@doctor_required
+def complete_appointment(appointment_id):
+    cursor = mysql.connection.cursor()
+    cursor.execute(
+        'UPDATE Appointment SET status = "Completed" WHERE appointment_id = %s AND doctor_id = %s',
+        (appointment_id, session['id'])
+    )
+    mysql.connection.commit()
+    cursor.close()
+    flash('Appointment marked as completed!', 'success')
+    return redirect(url_for('doctor_dashboard'))
 
 @app.route('/doctor/appointments')
 @doctor_required
@@ -610,36 +824,156 @@ def admin_reports():
     
     cursor.close()
     return render_template('admin/reports.html', appointments=appointments)
+# ========== NEW FEATURES ==========
 
-# ========== SYMPTOM CHECKER ==========
+@app.route('/patient/nearby_doctors')
+@patient_required
+def nearby_doctors():
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    
+    # Get all doctors with location
+    cursor.execute('SELECT * FROM Doctor WHERE latitude IS NOT NULL AND longitude IS NOT NULL')
+    doctors = cursor.fetchall()
+    
+    # Get patient's location (you can store this in session or get from their profile)
+    cursor.execute('SELECT * FROM Patient WHERE patient_id = %s', (session['id'],))
+    patient = cursor.fetchone()
+    
+    cursor.close()
+    
+    # Calculate distance for each doctor (Haversine formula)
+    import math
+    
+    def calculate_distance(lat1, lon1, lat2, lon2):
+        R = 6371  # Earth's radius in km
+        
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        
+        a = math.sin(delta_lat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        
+        return R * c
+    
+    # Add distance to each doctor
+    if patient and patient.get('latitude') and patient.get('longitude'):
+        for doctor in doctors:
+            if doctor.get('latitude') and doctor.get('longitude'):
+                doctor['distance'] = round(calculate_distance(
+                    float(patient['latitude']), 
+                    float(patient['longitude']),
+                    float(doctor['latitude']), 
+                    float(doctor['longitude'])
+                ), 2)
+        # Sort by distance
+        doctors.sort(key=lambda x: x.get('distance', 9999))
+    
+    return render_template('patient/nearby_doctors.html', doctors=doctors, patient=patient)
+
+@app.route('/patient/update_location', methods=['POST'])
+@patient_required
+def update_location():
+    latitude = request.form.get('latitude')
+    longitude = request.form.get('longitude')
+    address = request.form.get('address')
+    
+    cursor = mysql.connection.cursor()
+    cursor.execute(
+        'UPDATE Patient SET latitude = %s, longitude = %s, address = %s WHERE patient_id = %s',
+        (latitude, longitude, address, session['id'])
+    )
+    mysql.connection.commit()
+    cursor.close()
+    
+    flash('Location updated successfully!', 'success')
+    return redirect(url_for('nearby_doctors'))
+
+# ========== UPDATED SYMPTOM CHECKER WITH MORE DISEASES ==========
+
 SYMPTOM_DEPARTMENT_MAP = {
     'fever': ['General Medicine', 'Infectious Disease'],
     'cough': ['General Medicine', 'Pulmonology'],
     'cold': ['General Medicine', 'ENT'],
     'headache': ['General Medicine', 'Neurology'],
+    'migraine': ['Neurology'],
     'chest pain': ['Cardiology', 'Emergency'],
+    'heart attack': ['Cardiology', 'Emergency'],
     'stomach pain': ['Gastroenterology', 'General Medicine'],
+    'abdominal pain': ['Gastroenterology'],
     'back pain': ['Orthopedics', 'Neurology'],
     'skin rash': ['Dermatology'],
+    'acne': ['Dermatology'],
     'eye pain': ['Ophthalmology'],
+    'blurry vision': ['Ophthalmology'],
     'ear pain': ['ENT'],
+    'hearing loss': ['ENT'],
     'tooth pain': ['Dental'],
+    'toothache': ['Dental'],
     'joint pain': ['Orthopedics', 'Rheumatology'],
+    'arthritis': ['Rheumatology', 'Orthopedics'],
     'diabetes': ['Endocrinology'],
+    'high blood sugar': ['Endocrinology'],
     'high blood pressure': ['Cardiology'],
+    'hypertension': ['Cardiology'],
     'anxiety': ['Psychiatry', 'Psychology'],
     'depression': ['Psychiatry', 'Psychology'],
+    'stress': ['Psychiatry', 'Psychology'],
     'pregnancy': ['Gynecology', 'Obstetrics'],
+    'period pain': ['Gynecology'],
+    'menstrual cramps': ['Gynecology'],
     'pediatric': ['Pediatrics'],
     'child': ['Pediatrics'],
+    'baby': ['Pediatrics'],
     'bone fracture': ['Orthopedics'],
+    'broken bone': ['Orthopedics'],
     'allergy': ['Allergy & Immunology'],
+    'asthma': ['Pulmonology', 'Allergy & Immunology'],
     'urinary': ['Urology', 'Nephrology'],
     'kidney': ['Nephrology', 'Urology'],
+    'kidney stones': ['Urology', 'Nephrology'],
     'heart': ['Cardiology'],
+    'palpitations': ['Cardiology'],
     'brain': ['Neurology'],
+    'seizure': ['Neurology'],
     'mental health': ['Psychiatry'],
+    'insomnia': ['Neurology', 'Psychiatry'],
+    'sleep problems': ['Neurology', 'Psychiatry'],
+    'dizziness': ['Neurology', 'ENT'],
+    'vertigo': ['ENT', 'Neurology'],
+    'nausea': ['Gastroenterology', 'General Medicine'],
+    'vomiting': ['Gastroenterology', 'General Medicine'],
+    'diarrhea': ['Gastroenterology'],
+    'constipation': ['Gastroenterology'],
+    'weight loss': ['Endocrinology', 'General Medicine'],
+    'weight gain': ['Endocrinology', 'General Medicine'],
+    'fatigue': ['General Medicine', 'Endocrinology'],
+    'tiredness': ['General Medicine', 'Endocrinology'],
+    'shortness of breath': ['Pulmonology', 'Cardiology'],
+    'breathing problems': ['Pulmonology'],
+    'throat pain': ['ENT', 'General Medicine'],
+    'sore throat': ['ENT', 'General Medicine'],
+    'sinus': ['ENT'],
+    'sinusitis': ['ENT'],
+    'hair loss': ['Dermatology', 'Endocrinology'],
+    'eczema': ['Dermatology'],
+    'psoriasis': ['Dermatology'],
+    'thyroid': ['Endocrinology'],
+    'thyroid problems': ['Endocrinology'],
+    'anemia': ['Hematology', 'General Medicine'],
+    'bleeding': ['Hematology', 'Emergency'],
+    'urine infection': ['Urology', 'Nephrology'],
+    'UTI': ['Urology'],
+    'prostate': ['Urology'],
+    'cancer': ['Oncology'],
+    'tumor': ['Oncology'],
+    'liver': ['Gastroenterology', 'Hepatology'],
+    'jaundice': ['Gastroenterology', 'Hepatology'],
+    'hepatitis': ['Gastroenterology', 'Hepatology'],
 }
+
+
 
 def suggest_department(symptoms):
     symptoms_lower = symptoms.lower()
@@ -672,8 +1006,8 @@ def symptom_checker():
 
 # ========== EMAIL REMINDER SYSTEM ==========
 def send_appointment_reminder():
-    """Send email reminders for appointments scheduled tomorrow"""
-    # Create a direct connection because this runs in a background thread (outside Flask request context)
+    """Send email reminders 30 minutes before appointments"""
+    # Create a direct connection for the background thread
     conn = pymysql.connect(
         host=app.config['MYSQL_HOST'],
         user=app.config['MYSQL_USER'],
@@ -683,21 +1017,30 @@ def send_appointment_reminder():
     )
     cursor = conn.cursor()
     
-    tomorrow = (datetime.now() + timedelta(days=1)).date()
-    
     try:
+        # Calculate the exact time 30 minutes from now
+        now = datetime.now()
+        target_time = now + timedelta(minutes=30)
+        
+        # Format for MySQL query
+        target_date = target_time.date()
+        # MySQL TIME format is HH:MM:00
+        target_time_str = target_time.strftime('%H:%M:00') 
+        
+        # Find approved appointments happening in ~30 mins that haven't been reminded yet
         cursor.execute('''
             SELECT a.*, p.name as patient_name, p.email as patient_email,
                    d.name as doctor_name, d.email as doctor_email
             FROM Appointment a
             JOIN Patient p ON a.patient_id = p.patient_id
             JOIN Doctor d ON a.doctor_id = d.doctor_id
-            WHERE a.date = %s AND a.status = 'Approved'
-        ''', (tomorrow,))
+            WHERE a.date = %s AND a.time = %s AND a.status = 'Approved' AND a.reminder_sent = 0
+        ''', (target_date, target_time_str))
         
         appointments = cursor.fetchall()
         
         for appointment in appointments:
+            # 1. Send email to patient
             send_email_reminder(
                 to_email=appointment['patient_email'],
                 patient_name=appointment['patient_name'],
@@ -707,6 +1050,7 @@ def send_appointment_reminder():
                 recipient_type='patient'
             )
             
+            # 2. Send email to doctor
             send_email_reminder(
                 to_email=appointment['doctor_email'],
                 patient_name=appointment['patient_name'],
@@ -715,10 +1059,21 @@ def send_appointment_reminder():
                 appointment_time=appointment['time'],
                 recipient_type='doctor'
             )
+
+            # 3. Mark as reminded so it doesn't send again
+            cursor.execute(
+                'UPDATE Appointment SET reminder_sent = 1 WHERE appointment_id = %s', 
+                (appointment['appointment_id'],)
+            )
+            conn.commit()
+            
+    except Exception as e:
+        print(f"Error in reminder scheduler: {str(e)}")
     finally:
         cursor.close()
         conn.close()
 
+# ... (Keep your send_email_reminder function exactly as it is) ...
 def send_email_reminder(to_email, patient_name, doctor_name, appointment_date, appointment_time, recipient_type='patient'):
     try:
         if recipient_type == 'patient':
@@ -763,13 +1118,12 @@ def send_email_reminder(to_email, patient_name, doctor_name, appointment_date, a
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
 
+# Schedule the reminder to run EVERY MINUTE
 scheduler.add_job(
     func=send_appointment_reminder,
     trigger="cron",
-    hour=9,
-    minute=0
+    minute='*' 
 )
-
 # ========== REST APIs (All unchanged) ==========
 @app.route('/api/patient/register', methods=['POST'])
 def api_register():
@@ -881,8 +1235,16 @@ def api_book_appointment():
         existing = cursor.fetchone()
         
         if existing:
+            cursor.execute('SELECT name, specialization FROM Doctor WHERE doctor_id = %s', (doctor_id,))
+            busy_doc = cursor.fetchone()
+            
             cursor.close()
-            return jsonify({'success': False, 'message': 'Time slot already booked'}), 409
+            return jsonify({
+                'success': False, 
+                'message': f'Dr. {busy_doc["name"]} is busy at this time. Please find another {busy_doc["specialization"]} doctor.',
+                'suggested_action': 'search_other_doctors',
+                'specialization': busy_doc['specialization']
+            }), 409
         
         cursor.execute(
             'INSERT INTO Appointment (patient_id, doctor_id, date, time, status) VALUES (%s, %s, %s, %s, %s)',
@@ -1081,6 +1443,10 @@ def api_logout():
 @app.route('/api/health', methods=['GET'])
 def api_health_check():
     return jsonify({'status': 'OK', 'message': 'Hospital API is running', 'timestamp': datetime.now().isoformat()}), 200
+@app.route('/run_reminders')
+def run_reminders_route():
+    send_appointment_reminder()
+    return "Reminders checked!"
 
 # ========== MAIN EXECUTION ==========
 if __name__ == '__main__':

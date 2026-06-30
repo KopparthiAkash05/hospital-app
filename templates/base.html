@@ -30,11 +30,13 @@
         <!-- ========================================= -->
         
         {% if session.get('user_type') == 'patient' %}
-            <li><a href="{{ url_for('patient_dashboard') }}" class="{% if request.endpoint == 'patient_dashboard' %}active{% endif %}">Dashboard</a></li>
-            <li><a href="{{ url_for('view_doctors') }}" class="{% if request.endpoint == 'view_doctors' %}active{% endif %}">Find Doctors</a></li>
-            <li><a href="{{ url_for('symptom_checker') }}" class="{% if request.endpoint == 'symptom_checker' %}active{% endif %}">Symptom Checker</a></li>
-            
-            <li><a href="{{ url_for('logout') }}">Logout</a></li>
+    <li><a href="{{ url_for('patient_dashboard') }}" class="{% if request.endpoint == 'patient_dashboard' %}active{% endif %}">Dashboard</a></li>
+    <li><a href="{{ url_for('view_doctors') }}" class="{% if request.endpoint == 'view_doctors' %}active{% endif %}">Find Doctors</a></li>
+    <li><a href="{{ url_for('nearby_doctors') }}" class="{% if request.endpoint == 'nearby_doctors' %}active{% endif %}">Nearby Doctors</a></li>
+    <li><a href="{{ url_for('symptom_checker') }}" class="{% if request.endpoint == 'symptom_checker' %}active{% endif %}">Symptom Checker</a></li>
+    <li><a href="{{ url_for('patient_book_appointment_page') }}" class="{% if request.endpoint == 'patient_book_appointment_page' %}active{% endif %}">Book Appointment</a></li>
+    <li><a href="{{ url_for('logout') }}">Logout</a></li>
+
             
         {% elif session.get('user_type') == 'doctor' %}
             <li><a href="{{ url_for('doctor_dashboard') }}" class="{% if request.endpoint == 'doctor_dashboard' %}active{% endif %}">Dashboard</a></li>

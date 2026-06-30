@@ -21,8 +21,14 @@
                 <h3>{{ pending_appointments|length }}</h3>
                 <p>Pending Requests</p>
             </div>
+            <div class="stat-card">
+                <i class="fas fa-check-circle"></i>
+                <h3>{{ completed_appointments|length }}</h3>
+                <p>Completed</p>
+            </div>
         </div>
         
+        <!-- Today's Appointments -->
         <div class="dashboard-section">
             <h2><i class="fas fa-calendar-check"></i> Today's Appointments</h2>
             {% if today_appointments %}
@@ -31,34 +37,31 @@
                     <thead>
                         <tr>
                             <th>Patient Name</th>
+                            <th>Age</th>
+                            <th>Gender</th>
+                            <th>Phone</th>
+                            <th>Email</th>
+                            <th>Address</th>
                             <th>Time</th>
-                            <th>Contact</th>
-                            <th>Status</th>
                             <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for appointment in today_appointments %}
                         <tr>
-                            <td>{{ appointment.patient_name }}</td>
-                            <td>{{ appointment.time }}</td>
+                            <td><strong>{{ appointment.patient_name }}</strong></td>
+                            <td>{{ appointment.patient_age or 'N/A' }}</td>
+                            <td>{{ appointment.patient_gender or 'N/A' }}</td>
                             <td>{{ appointment.patient_phone }}</td>
-                            <td><span class="badge badge-{{ appointment.status.lower() }}">{{ appointment.status }}</span></td>
+                            <td>{{ appointment.patient_email }}</td>
+                            <td>{{ appointment.patient_address or 'N/A' }}</td>
+                            <td><strong>{{ appointment.time_formatted }}</strong></td>
                             <td>
-                                {% if appointment.status == 'Approved' %}
-                                <button class="btn btn-success btn-sm" disabled>
-                                    <i class="fas fa-check"></i> Approved
-                                </button>
-                                {% else %}
-                                <a href="{{ url_for('approve_appointment', appointment_id=appointment.appointment_id) }}" 
-                                   class="btn btn-success btn-sm">
-                                    <i class="fas fa-check"></i> Approve
+                                <a href="{{ url_for('complete_appointment', appointment_id=appointment.appointment_id) }}" 
+                                   class="btn btn-success btn-sm"
+                                   onclick="return confirm('Mark this appointment as completed?')">
+                                    <i class="fas fa-check"></i> Complete
                                 </a>
-                                <a href="{{ url_for('reject_appointment', appointment_id=appointment.appointment_id) }}" 
-                                   class="btn btn-danger btn-sm">
-                                    <i class="fas fa-times"></i> Reject
-                                </a>
-                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -73,6 +76,7 @@
             {% endif %}
         </div>
         
+        <!-- Pending Appointments -->
         <div class="dashboard-section">
             <h2><i class="fas fa-inbox"></i> Pending Appointment Requests</h2>
             {% if pending_appointments %}
@@ -82,8 +86,9 @@
                     <div class="appointment-info">
                         <h3>{{ appointment.patient_name }}</h3>
                         <p><i class="fas fa-calendar"></i> {{ appointment.date }}</p>
-                        <p><i class="fas fa-clock"></i> {{ appointment.time }}</p>
+                        <p><i class="fas fa-clock"></i> {{ appointment.time_formatted }}</p>
                         <p><i class="fas fa-envelope"></i> {{ appointment.patient_email }}</p>
+                        <p><i class="fas fa-phone"></i> {{ appointment.patient_phone }}</p>
                     </div>
                     <div class="appointment-actions">
                         <a href="{{ url_for('approve_appointment', appointment_id=appointment.appointment_id) }}" 
@@ -102,6 +107,50 @@
             <div class="empty-state">
                 <i class="fas fa-inbox"></i>
                 <p>No pending requests</p>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Completed Appointments -->
+        <div class="dashboard-section">
+            <h2><i class="fas fa-check-double"></i> Completed Appointments</h2>
+            {% if completed_appointments %}
+            <div class="appointments-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Patient Name</th>
+                            <th>Age</th>
+                            <th>Gender</th>
+                            <th>Phone</th>
+                            <th>Email</th>
+                            <th>Address</th>
+                            <th>Specialization</th>
+                            <th>Date</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for appointment in completed_appointments %}
+                        <tr>
+                            <td><strong>{{ appointment.patient_name }}</strong></td>
+                            <td>{{ appointment.patient_age or 'N/A' }}</td>
+                            <td>{{ appointment.patient_gender or 'N/A' }}</td>
+                            <td>{{ appointment.patient_phone }}</td>
+                            <td>{{ appointment.patient_email }}</td>
+                            <td>{{ appointment.patient_address or 'N/A' }}</td>
+                            <td><span class="badge badge-approved">{{ appointment.specialization }}</span></td>
+                            <td>{{ appointment.date }}</td>
+                            <td><strong>{{ appointment.time_formatted }}</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-clipboard-check"></i>
+                <p>No completed appointments yet</p>
             </div>
             {% endif %}
         </div>
