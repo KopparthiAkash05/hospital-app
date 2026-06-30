@@ -623,14 +623,20 @@ def doctor_dashboard():
     today = datetime.now().date()
     
     # 1. Get Today's Appointments
+        # Get today's appointments with FULL patient details
+    # CHANGED 'JOIN' TO 'LEFT JOIN' TO PREVENT MISSING ROWS
     cursor.execute('''
-        SELECT a.*, p.name as patient_name, p.email as patient_email, 
-               p.phone as patient_phone, p.age as patient_age, 
-               p.gender as patient_gender, p.address as patient_address,
+        SELECT a.*, 
+               p.name as patient_name, 
+               p.email as patient_email, 
+               p.phone as patient_phone,
+               p.age as patient_age,
+               p.gender as patient_gender,
+               p.address as patient_address,
                d.specialization
         FROM Appointment a 
-        JOIN Patient p ON a.patient_id = p.patient_id
-        JOIN Doctor d ON a.doctor_id = d.doctor_id
+        LEFT JOIN Patient p ON a.patient_id = p.patient_id
+        LEFT JOIN Doctor d ON a.doctor_id = d.doctor_id
         WHERE a.doctor_id = %s AND a.date = %s AND a.status = 'Approved'
         ORDER BY a.time
     ''', (session['id'], today))
