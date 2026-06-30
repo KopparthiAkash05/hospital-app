@@ -601,7 +601,6 @@ def patient_book_appointment_page():
     today = datetime.now().strftime('%Y-%m-%d')
     return render_template('patient/book_appointment_page.html', doctors=doctors, today=today)
 
-
 @app.route('/patient/cancel/<int:appointment_id>')
 @patient_required
 def cancel_appointment(appointment_id):
