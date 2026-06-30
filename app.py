@@ -601,18 +601,6 @@ def patient_book_appointment_page():
     today = datetime.now().strftime('%Y-%m-%d')
     return render_template('patient/book_appointment_page.html', doctors=doctors, today=today)
 
-@app.route('/patient/cancel/<int:appointment_id>')
-@patient_required
-def cancel_appointment(appointment_id):
-    cursor = mysql.connection.cursor()
-    cursor.execute(
-        'UPDATE Appointment SET status = "Cancelled" WHERE appointment_id = %s AND patient_id = %s',
-        (appointment_id, session['id'])
-    )
-    mysql.connection.commit()
-    cursor.close()
-    flash('Appointment cancelled successfully!', 'info')
-    return redirect(url_for('patient_dashboard'))
 
 @app.route('/patient/cancel/<int:appointment_id>')
 @patient_required
