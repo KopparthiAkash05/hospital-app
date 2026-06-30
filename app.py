@@ -453,12 +453,27 @@ def patient_dashboard():
     cursor.close()
     
     # Convert times to 12-hour AM/PM format
+        # Convert times to 12-hour AM/PM format
     def format_time_12hr(time_obj):
         if time_obj is None:
             return ''
+        
+        # Handle timedelta objects (MySQL sometimes returns these)
+        from datetime import timedelta
+        if isinstance(time_obj, timedelta):
+            # Convert timedelta to time object
+            total_seconds = int(time_obj.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            from datetime import time
+            time_obj = time(hours, minutes)
+        
+        # Handle string time values
         if isinstance(time_obj, str):
             time_obj = datetime.strptime(time_obj, '%H:%M:%S').time()
-        return time_obj.strftime('%I:%M %p')
+        
+        # Now format as 12-hour time
+        return time_obj.strftime('%I:%M %p')  # e.g., "09:30 AM" or "02:00 PM"
     
     for appt in upcoming_appointments:
         appt['time_formatted'] = format_time_12hr(appt['time'])
@@ -607,15 +622,11 @@ def doctor_dashboard():
     
     today = datetime.now().date()
     
-    # Get today's appointments with FULL patient details
+    # 1. Get Today's Appointments
     cursor.execute('''
-        SELECT a.*, 
-               p.name as patient_name, 
-               p.email as patient_email, 
-               p.phone as patient_phone,
-               p.age as patient_age,
-               p.gender as patient_gender,
-               p.address as patient_address,
+        SELECT a.*, p.name as patient_name, p.email as patient_email, 
+               p.phone as patient_phone, p.age as patient_age, 
+               p.gender as patient_gender, p.address as patient_address,
                d.specialization
         FROM Appointment a 
         JOIN Patient p ON a.patient_id = p.patient_id
@@ -625,13 +636,10 @@ def doctor_dashboard():
     ''', (session['id'], today))
     today_appointments = cursor.fetchall()
     
-    # Get pending appointments
+    # 2. Get Pending Appointments
     cursor.execute('''
-        SELECT a.*, 
-               p.name as patient_name, 
-               p.email as patient_email, 
-               p.phone as patient_phone,
-               d.specialization
+        SELECT a.*, p.name as patient_name, p.email as patient_email, 
+               p.phone as patient_phone, d.specialization
         FROM Appointment a 
         JOIN Patient p ON a.patient_id = p.patient_id
         JOIN Doctor d ON a.doctor_id = d.doctor_id
@@ -640,15 +648,11 @@ def doctor_dashboard():
     ''', (session['id'],))
     pending_appointments = cursor.fetchall()
     
-    # Get completed appointments
+    # 3. Get Completed Appointments
     cursor.execute('''
-        SELECT a.*, 
-               p.name as patient_name, 
-               p.email as patient_email, 
-               p.phone as patient_phone,
-               p.age as patient_age,
-               p.gender as patient_gender,
-               p.address as patient_address,
+        SELECT a.*, p.name as patient_name, p.email as patient_email, 
+               p.phone as patient_phone, p.age as patient_age, 
+               p.gender as patient_gender, p.address as patient_address,
                d.specialization
         FROM Appointment a 
         JOIN Patient p ON a.patient_id = p.patient_id
@@ -660,20 +664,29 @@ def doctor_dashboard():
     
     cursor.close()
     
-    # Convert times to 12-hour AM/PM format
+    # ==========================================
+    # DEFINE THE FUNCTION ONLY ONCE HERE
+    # ==========================================
     def format_time_12hr(time_obj):
         if time_obj is None:
             return ''
+        from datetime import timedelta, time as dt_time
+        if isinstance(time_obj, timedelta):
+            total_seconds = int(time_obj.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            time_obj = dt_time(hours, minutes)
         if isinstance(time_obj, str):
             time_obj = datetime.strptime(time_obj, '%H:%M:%S').time()
-        return time_obj.strftime('%I:%M %p')  # e.g., "09:30 AM" or "02:00 PM"
-    
+        return time_obj.strftime('%I:%M %p')
+
+    # Apply formatting to ALL lists using the SAME function
     for appt in today_appointments:
         appt['time_formatted'] = format_time_12hr(appt['time'])
-    
+        
     for appt in pending_appointments:
         appt['time_formatted'] = format_time_12hr(appt['time'])
-    
+        
     for appt in completed_appointments:
         appt['time_formatted'] = format_time_12hr(appt['time'])
     

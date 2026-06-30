@@ -7,3 +7,4 @@ APScheduler==3.10.4
 python-dotenv==1.0.0
 gunicorn==21.2.0
 cryptography==41.0.7
+markupsafe==2.1.3
