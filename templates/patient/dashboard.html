@@ -26,55 +26,18 @@
             </div>
             
             <!-- Upcoming Appointments -->
-            <!-- Upcoming Appointments Section -->
-<div class="dashboard-section">
-    <h2><i class="fas fa-calendar-check"></i> Upcoming Appointments</h2>
-    
-    {% if upcoming_appointments %}
-    <div class="appointments-table">
-        <table>
-            <thead>
-                <tr>
-                    <th>Doctor Name</th>
-                    <th>Specialization</th>
-                    <th>Date</th>
-                    <th>Time</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for appointment in upcoming_appointments %}
-                <tr>
-                    <td><strong>Dr. {{ appointment.doctor_name }}</strong></td>
-                    <td>{{ appointment.specialization }}</td>
-                    <td>{{ appointment.date }}</td>
-                    <td>{{ appointment.time_formatted }}</td>
-                    <td>
-                        <span class="badge badge-{% if appointment.status == 'Approved' %}approved{% else %}pending{% endif %}">
-                            {{ appointment.status }}
-                        </span>
-                    </td>
-                    <td>
-                        <!-- CANCEL BUTTON -->
-                        <a href="{{ url_for('cancel_appointment', appointment_id=appointment.appointment_id) }}" 
-                           class="btn btn-danger btn-sm"
-                           onclick="return confirm('Are you sure you want to cancel this appointment? This action cannot be undone.')">
-                            <i class="fas fa-times"></i> Cancel
-                        </a>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <i class="fas fa-calendar-times"></i>
-        <p>No upcoming appointments</p>
-    </div>
-    {% endif %}
-</div>
+            <div class="dashboard-section">
+                <h2><i class="fas fa-calendar-alt"></i> Upcoming Appointments</h2>
+                {% if upcoming_appointments %}
+                <div class="appointments-list">
+                    {% for appointment in upcoming_appointments %}
+                    <div class="appointment-card status-{{ appointment.status.lower() }}">
+                        <div class="appointment-info">
+                            <h3>Dr. {{ appointment.doctor_name }}</h3>
+                            <p><i class="fas fa-stethoscope"></i> {{ appointment.specialization }}</p>
+                            <p><i class="fas fa-calendar"></i> {{ appointment.date }}</p>
+                            <!-- For upcoming appointments -->
+<p><i class="fas fa-clock"></i> {{ appointment.time_formatted }}</p>
 
 <!-- For appointment history -->
 <p><i class="fas fa-clock"></i> {{ appointment.time_formatted }}</p>
